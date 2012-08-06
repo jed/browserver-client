@@ -1,0 +1,12 @@
+{
+  "name": "brow-client",
+  "version": "0.0.0",
+  "description": "෴ A node.js HTTP server in your browser ෴",
+  "main": "browserver.js",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/jed/browserver-client.git"
+  },
+  "author": "Jed Schmidt",
+  "license": "BSD"
+}
