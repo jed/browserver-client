@@ -6,8 +6,8 @@ new function browserver() {
   http.Server         = Server
   http.WebSocket      = WebSocket
   http.ServerResponse = ServerResponse
-
-  http.source = "new " + browserver
+  http.globalAgent    = null
+  http.source         = "new " + browserver
 
   if (typeof exports == "undefined") root["http"] = http
 
@@ -86,6 +86,8 @@ new function browserver() {
     if (ws.browserver) return ws.browserver
 
     var self = this
+
+    if (!http.globalAgent) http.globalAgent = this
 
     EventEmitter.call(this)
 
