@@ -59,6 +59,8 @@ new function browserver() {
 
     if (i >= 0) fns.splice(i, 1)
 
+    if (fns && !fns.length) delete this._events[event]
+
     return this
   }
 
