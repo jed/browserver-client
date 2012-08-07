@@ -98,26 +98,40 @@ new function browserver() {
     ws.onclose   = function(    ){ self.emit("close") }
     ws.onerror   = function(data){ self.emit("error", data) }
 
-    this.on("message", function(data) {
-      var req = data.data || data
+    this.requests = {}
 
-      try { req = JSON.parse(req) }
+    this.on("message", function(data) {
+      data = data.data || data
+
+      try { data = JSON.parse(data) }
       catch (error) { this.emit("error", error) }
 
-      if (req.method) {
+      if (data.method) {
         var res = new ServerResponse
         res.ws = this.ws
         res.headers = {
-          "x-brow-req-id": req.headers["x-brow-req-id"]
+          "x-brow-req-id": data.headers["x-brow-req-id"]
         }
 
-        delete req.headers["x-brow-req-id"]
+        delete data.headers["x-brow-req-id"]
 
-        this.emit("request", req, res)
+        this.emit("request", data, res)
       }
 
-      else if (req.statusCode) {
-        // handle http client response
+      else if (data.statusCode) {
+        var id = data.headers["x-brow-req-id"]
+        delete data.headers["x-brow-req-id"]
+
+        var res = new ClientResponse
+        res.statusCode = data.statusCode
+        res.headers = data.headers
+        res.body = data.body
+
+        this.requests[id].emit("response", res)
+        res.emit("data", data.body)
+        res.emit("end")
+
+        delete this.requests[id]
       }
 
       else this.emit("error", new Error("Unrecognized message."))
@@ -211,4 +225,66 @@ new function browserver() {
       body: this.body
     }
   }
+
+  var anchor = root.document && document.createElement("a")
+
+  function ClientRequest(opts, cb) {
+    if (typeof opts == "string") {
+      anchor.href = opts
+      opts        = {}
+
+      opts.hostname = anchor.hostname
+      opts.port     = anchor.port
+      opts.path     = anchor.pathname + anchor.search
+    }
+
+    this.url = opts.path
+    this.method = opts.method || "GET"
+    this.headers = {host: opts.hostname}
+
+    if (opts.port) this.headers.host += ":" + opts.port
+
+    this.agent = opts.agent || http.globalAgent
+
+    this.once("response", cb)
+  }
+
+  ClientRequest.prototype = new EventEmitter
+
+  ClientRequest.prototype.body = ""
+
+  ClientRequest.prototype.write = function(chunk) {
+    this.body += chunk
+  }
+
+  ClientRequest.prototype.end = function(chunk) {
+    var self = this
+    var id = Math.random().toString(36).slice(2)
+
+    if (arguments.length) this.write(chunk)
+
+    this.headers["x-brow-req-id"] = id
+    this.agent.requests[id] = this
+    this.agent.ws.send(JSON.stringify(this))
+  }
+
+  ClientRequest.prototype.toJSON = function() {
+    return {
+      method: this.method,
+      url: this.url,
+      headers: this.headers,
+      body: this.body || undefined
+    }
+  }
+
+  http.get = function(opts, cb) {
+    return new ClientRequest(opts, cb).end()
+  }
+
+  http.request = function(opts, cb) {
+    return new ClientRequest(opts, cb)
+  }
+
+  function ClientResponse(){}
+  ClientResponse.prototype = new EventEmitter
 }
