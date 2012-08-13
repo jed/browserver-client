@@ -46,6 +46,8 @@ new function browserver() {
       , length = fns.length
       , i = 0
 
+    if (event == "error" && !length) throw args[0]
+
     while (i < length) fns[i++].apply(this, args)
 
     return this
