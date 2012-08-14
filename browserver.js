@@ -5,7 +5,11 @@ new function browserver() {
   http.EventEmitter   = EventEmitter
   http.Server         = Server
   http.WebSocket      = WebSocket
+  http.ServerRequest  = ServerRequest
   http.ServerResponse = ServerResponse
+  http.ClientRequest  = ClientRequest
+  http.ClientResponse = ClientResponse
+
   http.globalAgent    = null
   http.source         = "new " + browserver
 
@@ -85,7 +89,6 @@ new function browserver() {
 
   function WebSocket(ws) {
     if (!ws) throw new Error("No WebSocket specified.")
-    if (!JSON) throw new Error("JSON is required")
 
     if (ws.browserver) return ws.browserver
 
@@ -105,38 +108,35 @@ new function browserver() {
     this.on("message", function(data) {
       data = data.data || data
 
-      try { data = JSON.parse(data) }
-      catch (error) { this.emit("error", error) }
+      var req, res
 
-      if (data.method) {
-        var res = new ServerResponse
+      if (data.slice(0, 3) == "HTTP") {
+        res = new ClientResponse
+        res.parse(data)
+
+        var id = res.headers["x-brow-req-id"]
+        this.requests[id].emit("response", res)
+        delete this.requests[id]
+
+        res.emit("data", res._body)
+        res.emit("end")
+      }
+
+      else {
+        req = new ServerRequest
+        req.parse(data)
+
+        res = new ServerResponse
         res.ws = this.ws
+        res.httpVersion = req.httpVersion
         res.headers = {
-          "x-brow-req-id": data.headers["x-brow-req-id"]
+          "x-brow-req-id": req.headers["x-brow-req-id"]
         }
 
-        delete data.headers["x-brow-req-id"]
-
-        this.emit("request", data, res)
+        this.emit("request", req, res)
+        req.emit("data", req._body)
+        req.emit("end")
       }
-
-      else if (data.statusCode) {
-        var id = data.headers["x-brow-req-id"]
-        delete data.headers["x-brow-req-id"]
-
-        var res = new ClientResponse
-        res.statusCode = data.statusCode
-        res.headers = data.headers
-        res.body = data.body
-
-        this.requests[id].emit("response", res)
-        res.emit("data", data.body)
-        res.emit("end")
-
-        delete this.requests[id]
-      }
-
-      else this.emit("error", new Error("Unrecognized message."))
     })
 
     this.ws = ws
@@ -186,46 +186,36 @@ new function browserver() {
     return this
   }
 
+  function ServerRequest() {}
+  ServerRequest.prototype = new EventEmitter
+  ServerRequest.prototype.parse = parseHTTP
+
   function ServerResponse(){}
-
+  ServerResponse.prototype.serialize = serializeHTTP
   ServerResponse.prototype.statusCode = 200
-  ServerResponse.prototype.body = ""
+  ServerResponse.prototype._body = ""
 
-  ServerResponse.prototype.writeHead = function(statusCode, headers) {
+  ServerResponse.prototype.writeHead = function(statusCode, reason, headers) {
+    if (typeof reason != "string") headers = reason, reason = ""
+
     this.statusCode = statusCode
+    this.reason = reason
 
     for (var key in headers) this.headers[key] = headers[key]
   }
 
   ServerResponse.prototype.write = function(chunk) {
-    if (chunk != Object(chunk)) {
-      chunk = JSON.stringify(chunk)
-      this.headers["Content-Type"] = "application/json"
-    }
-
     if (typeof chunk != "string") {
       throw new Error("Response must be a string.")
     }
 
-    this.body += chunk
+    this._body += chunk
   }
 
   ServerResponse.prototype.end = function(chunk) {
     if (arguments.length) this.write(chunk)
 
-    this.send()
-  }
-
-  ServerResponse.prototype.send = function() {
-    this.ws.send(JSON.stringify(this))
-  }
-
-  ServerResponse.prototype.toJSON = function() {
-    return {
-      statusCode: this.statusCode,
-      headers: this.headers,
-      body: this.body
-    }
+    this.ws.send(this.serialize())
   }
 
   var anchor = root.document && document.createElement("a")
@@ -252,11 +242,12 @@ new function browserver() {
   }
 
   ClientRequest.prototype = new EventEmitter
+  ClientRequest.prototype.serialize = serializeHTTP
 
-  ClientRequest.prototype.body = ""
+  ClientRequest.prototype._body = ""
 
   ClientRequest.prototype.write = function(chunk) {
-    this.body += chunk
+    this._body += chunk
   }
 
   ClientRequest.prototype.end = function(chunk) {
@@ -267,16 +258,68 @@ new function browserver() {
 
     this.headers["x-brow-req-id"] = id
     this.agent.requests[id] = this
-    this.agent.ws.send(JSON.stringify(this))
+
+    console.log(this.serializeHTTP())
+    this.agent.ws.send(this.serializeHTTP())
   }
 
-  ClientRequest.prototype.toJSON = function() {
-    return {
-      method: this.method,
-      url: this.url,
-      headers: this.headers,
-      body: this.body || undefined
+  function ClientResponse(){}
+  ClientResponse.prototype = new EventEmitter
+  ClientResponse.prototype.parse = parseHTTP
+
+  function parseHTTP(data) {
+    var pattern = /\r?\n/g
+    var headers = this.headers = {}
+    var match = pattern.exec(data)
+    var start = 0
+    var end = match.index
+    var row = data.slice(start, end).split(" ")
+
+    if (row[1] > 0) {
+      this.httpVersion = row[0].slice(5)
+      this.statusCode = +row[1]
+      this.reason = row[2]
     }
+
+    else {
+      this.method = row[0]
+      this.url = row[1]
+      this.httpVersion = row[2].slice(5)
+    }
+
+    while (true) {
+      start = end + match[0].length
+      match = pattern.exec(data)
+      end = match.index
+      row = data.slice(start, end)
+
+      if (!row) break
+
+      start = row.match(/:\s*/)
+      headers[row.slice(0, start.index)] = row.slice(start.index + start[0].length)
+    }
+
+    this._body = data.slice(end + match[0].length)
+
+    return this
+  }
+
+  var CRLF = "\r\n"
+
+  function serializeHTTP() {
+    var data = this.statusCode
+      ? "HTTP/" + this.httpVersion + " " + this.statusCode
+      : this.method + " " + this.url + " HTTP/" + this.httpVersion
+
+    data += CRLF
+
+    for (var name in this.headers) {
+      data += name + ": " + this.headers[name] + CRLF
+    }
+
+    data += CRLF + this._body
+
+    return data
   }
 
   http.get = function(opts, cb) {
@@ -286,7 +329,4 @@ new function browserver() {
   http.request = function(opts, cb) {
     return new ClientRequest(opts, cb)
   }
-
-  function ClientResponse(){}
-  ClientResponse.prototype = new EventEmitter
 }
