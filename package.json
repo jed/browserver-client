@@ -1,6 +1,6 @@
 {
   "name": "brow-client",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "෴ A node.js HTTP server in your browser ෴",
   "main": "browserver.js",
   "repository": {
