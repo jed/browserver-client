@@ -110,7 +110,7 @@ new function browserver() {
 
       var req, res
 
-      if (data.slice(0, 3) == "HTTP") {
+      if (data.charCodeAt(0) == 72) {
         res = new ClientResponse
         res.parse(data)
 
