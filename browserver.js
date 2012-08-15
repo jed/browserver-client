@@ -259,7 +259,6 @@ new function browserver() {
     this.headers["x-brow-req-id"] = id
     this.agent.requests[id] = this
 
-    console.log(this.serializeHTTP())
     this.agent.ws.send(this.serializeHTTP())
   }
 
