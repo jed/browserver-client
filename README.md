@@ -1,3 +1,4 @@
+[![build status](https://secure.travis-ci.org/jed/browserver-client.png)](http://travis-ci.org/jed/browserver-client)
 ෴ browserver-client ෴
 ========================
 
