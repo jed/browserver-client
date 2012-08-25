@@ -17,7 +17,7 @@ In `index.html`:
 <html>
   <head>
     <title>My Browserver App</title>
-    <script src="/path/to/websocket-shim"></script>
+    <script src="/optional/path/to/websocket-shim"></script>
     <script src="/path/to/browserver"></script>
     <script src="/app.js"></script>
   </head>
