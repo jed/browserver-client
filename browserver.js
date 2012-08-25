@@ -41,6 +41,8 @@
   }
 
   EventEmitter.prototype.on = function(event, fn) {
+    if (typeof fn != "function") throw new TypeError
+
     var fns = this._events[event]
 
     if (!fns) fns = this._events[event] = []
@@ -51,44 +53,52 @@
   }
 
   EventEmitter.prototype.emit = function(event) {
-    var fns = this._events[event] || []
-      , args = fns.slice.call(arguments, 1)
-      , length = fns.length
-      , i = 0
+    var fns = this._events[event]
+
+    if (!fns) return this
+
+    var args = fns.slice.call(arguments, 1)
+    var length = fns.length
 
     if (event == "error" && !length) throw args[0]
 
-    while (i < length) fns[i++].apply(this, args)
+    fns = fns.slice(0)
+
+    for (var i = 0; i < length; i++) fns[i].apply(this, args)
 
     return this
   }
 
   EventEmitter.prototype.removeListener = function(event, fn) {
     var fns = this._events[event]
-      , i = fns && fns.length
 
-    while (i--) if (fns[i] == fn) break
+    if (!fns) return this
 
-    if (i >= 0) fns.splice(i, 1)
+    var length = fns.length
 
-    if (fns && !fns.length) delete this._events[event]
+    for (var i = 0; i < length; i++) {
+      if (fns[i] == fn) { fns.splice(i, 1); break }
+    }
+
+    if (!fns.length) delete this._events[event]
 
     return this
   }
 
   EventEmitter.prototype.once = function(event, fn) {
-    function proxy() {
-      fn.apply(this, arguments)
-      this.removeListener(event, proxy)
-    }
+    var self = this
 
-    return this.on(event, proxy)
+    this.on(event, function proxy() {
+      self.removeListener(event, proxy)
+      fn.apply(this, arguments)
+    })
+
+    return this
   }
 
   EventEmitter.removeAllListeners = function(event) {
-    event
-      ? delete this._events[event]
-      : this._events = {}
+    if (!arguments.length) this._events = {}
+    else delete this._events[event]
 
     return this
   }
