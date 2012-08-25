@@ -1,17 +1,30 @@
-new function browserver() {
-  var root = function(){ return this }()
-  var http = this
+!function() {
+  var root = this
+  var http = {}
 
-  http.EventEmitter   = EventEmitter
-  http.Server         = Server
-  http.WebSocket      = WebSocket
-  http.ServerRequest  = ServerRequest
-  http.ServerResponse = ServerResponse
-  http.ClientRequest  = ClientRequest
-  http.ClientResponse = ClientResponse
+  http.EventEmitter = EventEmitter
+  http.Socket       = Socket
+  http.Stream       = Stream
+  http.Server       = Server
+  http.Agent        = Agent
+  http.Message      = Message
+  http.Request      = Request
+  http.Response     = Response
 
-  http.globalAgent    = null
-  http.source         = "new " + browserver
+  http.globalAgent  = null
+  http.STATUS_CODES = {}
+
+  http.guid = function() {
+    return Math.random().toString(36).slice(2)
+  }
+
+  var previousHttp = root.http
+
+  http.noConflict = function() {
+    root.http = previousHttp
+
+    return http
+  }
 
   if (typeof exports == "undefined") root["http"] = http
 
@@ -23,13 +36,6 @@ new function browserver() {
     exports.http = http
   }
 
-  var previousHttp = root.http
-  http.noConflict = function() {
-    root.http = previousHttp
-
-    return this
-  }
-
   function EventEmitter() {
     this._events = {}
   }
@@ -37,9 +43,9 @@ new function browserver() {
   EventEmitter.prototype.on = function(event, fn) {
     var fns = this._events[event]
 
-    fns
-      ? fns.push(fn)
-      : this._events[event] = [fn]
+    if (!fns) fns = this._events[event] = []
+
+    fns.push(fn)
 
     return this
   }
@@ -57,7 +63,7 @@ new function browserver() {
     return this
   }
 
-  EventEmitter.prototype.removeListener = function(fn) {
+  EventEmitter.prototype.removeListener = function(event, fn) {
     var fns = this._events[event]
       , i = fns && fns.length
 
@@ -87,96 +93,229 @@ new function browserver() {
     return this
   }
 
-  function WebSocket(ws) {
-    if (!ws) throw new Error("No WebSocket specified.")
+  function Stream() {
+    EventEmitter.call(this)
+  }
 
-    if (ws.browserver) return ws.browserver
+  Stream.prototype = new EventEmitter
+
+  Stream.prototype.body = ""
+
+  Stream.prototype.write = function(chunk) {
+    this.body += chunk
+  }
+
+  Stream.prototype.end = function(chunk) {
+    if (arguments.length) this.write(chunk)
+
+    this.emit("end")
+  }
+
+  function Socket(socket) {
+    if (socket._browserver) return socket._browserver
+
+    socket._browserver = this
+
+    EventEmitter.call(this)
 
     var self = this
 
-    if (!http.globalAgent) http.globalAgent = this
+    socket.onopen = function() {
+      self.emit("open")
+    }
 
-    EventEmitter.call(this)
+    socket.onmessage = function(data) {
+      if ("data" in data) data = data.data
 
-    ws.onopen    = function(    ){ self.emit("open") }
-    ws.onmessage = function(data){ self.emit("message", data) }
-    ws.onclose   = function(    ){ self.emit("close") }
-    ws.onerror   = function(data){ self.emit("error", data) }
+      var req = (new Request).parse(data)
 
-    this.requests = {}
+      if (req) return self.emit("request", req)
 
-    this.on("message", function(data) {
-      data = data.data || data
+      var res = (new Response).parse(data)
 
-      var req, res
+      if (res) self.emit("response", res)
+    }
 
-      if (data.charCodeAt(0) == 72) {
-        res = new ClientResponse
-        res.parse(data)
+    socket.onclose = function() {
+      self.emit("close")
+    }
 
-        var id = res.headers["x-brow-req-id"]
-        this.requests[id].emit("response", res)
-        delete this.requests[id]
+    socket.onerror = function(data) {
+      self.emit("error", data)
+    }
 
-        res.emit("data", res._body)
-        res.emit("end")
-      }
+    this.socket = socket
 
-      else {
-        req = new ServerRequest
-        req.parse(data)
-
-        res = new ServerResponse
-        res.ws = this.ws
-        res.httpVersion = req.httpVersion
-        res.headers = {
-          "x-brow-req-id": req.headers["x-brow-req-id"]
-        }
-
-        this.emit("request", req, res)
-        req.emit("data", req._body)
-        req.emit("end")
-      }
-    })
-
-    this.ws = ws
-    ws.browserver = this
+    if (!http.globalAgent) {
+      http.globalAgent = (new Agent).listen(socket)
+    }
 
     return this
   }
 
-  WebSocket.prototype = new EventEmitter
+  Socket.prototype = new EventEmitter
 
-  WebSocket.prototype.close = function() {
+  Socket.prototype.send = function(data) {
+    this.socket.send(data)
+  }
+
+  Socket.prototype.close = function() {
     this.removeAllListeners()
 
-    this.ws.onopen = null
-    this.ws.onmessage = null
-    this.ws.onclose = null
-    this.ws.onerror = null
+    this.socket.onopen    = null
+    this.socket.onmessage = null
+    this.socket.onclose   = null
+    this.socket.onerror   = null
 
-    delete this.ws
+    delete this.socket
 
     return this
   }
 
-  this.createServer = function(fn){ return new Server(fn) }
+  function Message(){}
+
+  Message.prototype.parse = function(data) {
+    var match = data.match(/\r?\n\r?\n/)
+
+    this.body = data.slice(match.index + match[0].length)
+
+    match = data.slice(0, match.index).split(/\r?\n/)
+
+    this.startLine = match[0]
+
+    var headers = this.headers = {}
+    var length = match.length
+
+    for (var i = 1; i < length; i++) {
+      data = match[i].match(/^([^:]+):\s*(.+)/)
+
+      data[1] == "x-brow-req-id"
+        ? this.id = data[2]
+        : headers[data[1]] = data[2]
+    }
+
+    return this
+  }
+
+  Message.prototype.serialize = function() {
+    var message = this.startLine + "\r\n"
+
+    for (var name in this.headers) {
+      message += name + ": " + this.headers[name] + "\r\n"
+    }
+
+    message += "x-brow-req-id: " + this.id + "\r\n"
+
+    return message + "\r\n" + this.body
+  }
+
+  function Request() {
+    Stream.call(this)
+  }
+
+  Request.pattern = /^(\S+) (\S+) HTTP\/(\S+)$/
+
+  Request.prototype = new Stream
+  Request.prototype.httpVersion = "1.1"
+  Request.prototype.parse = function(data) {
+    Message.prototype.parse.call(this, data)
+
+    var match = this.startLine.match(Request.pattern)
+
+    if (!match) return null
+
+    this.method      = match[1]
+    this.url         = match[2]
+    this.httpVersion = match[3]
+
+    return this
+  }
+
+  Request.prototype.serialize = function() {
+    this.startLine =
+      this.method + " " +
+      this.url + " " +
+      "HTTP/" + this.httpVersion
+
+    return Message.prototype.serialize.call(this)
+  }
+
+  function Response() {
+    Stream.call(this)
+  }
+
+  Response.pattern = /^HTTP\/(\S+) (\S+) (\S*)$/
+
+  Response.prototype = new Stream
+  Response.prototype.httpVersion = "1.1"
+  Response.prototype.writeHead = function(code, reason, headers) {
+    if (typeof reason != "string") {
+      headers = reason
+      reason = ""
+    }
+
+    this.statusCode = code
+    this.reasonPhrase = reason
+    this.headers = headers || {}
+  }
+
+  Response.prototype.parse = function(data) {
+    Message.prototype.parse.call(this, data)
+
+    var match = this.startLine.match(Response.pattern)
+
+    if (!match) return null
+
+    this.httpVersion  = match[1]
+    this.statusCode   = match[2]
+    this.reasonPhrase = match[3]
+
+    return this
+  }
+
+  Response.prototype.serialize = function() {
+    this.startLine =
+      "HTTP/" + this.httpVersion + " " +
+      this.statusCode + " " +
+      (http.STATUS_CODES[this.statusCode] || "")
+
+    return Message.prototype.serialize.call(this)
+  }
 
   function Server(listener) {
     EventEmitter.call(this)
+
+    this.responses = {}
 
     if (listener) this.on("request", listener)
   }
 
   Server.prototype = new EventEmitter
 
-  Server.prototype.listen = function(ws, cb) {
-    var self = this
+  Server.prototype.listen = function(socket, cb) {
+    var server = this
 
-    this.ws = new WebSocket(ws)
+    this.socket = new Socket(socket)
 
-    this.ws.on("request", function(req, res) {
-      self.emit("request", req, res)
+    this.socket.on("request", function(req) {
+      var res = new Response
+
+      res.httpVersion = req.httpVersion
+      res.id = req.id
+
+      res.once("end", function() {
+        if (!server.responses[res.id]) return
+
+        delete server.responses[res.id]
+        server.socket.send(res.serialize())
+      })
+
+      server.responses[res.id] = res
+
+      server.emit("request", req, res)
+
+      req.emit("data", req.body)
+      req.emit("end")
     })
 
     this.emit("listening")
@@ -186,146 +325,76 @@ new function browserver() {
     return this
   }
 
-  function ServerRequest() {}
-  ServerRequest.prototype = new EventEmitter
-  ServerRequest.prototype.parse = parseHTTP
-
-  function ServerResponse(){}
-  ServerResponse.prototype.serialize = serializeHTTP
-  ServerResponse.prototype.statusCode = 200
-  ServerResponse.prototype._body = ""
-
-  ServerResponse.prototype.writeHead = function(statusCode, reason, headers) {
-    if (typeof reason != "string") headers = reason, reason = ""
-
-    this.statusCode = statusCode
-    this.reason = reason
-
-    for (var key in headers) this.headers[key] = headers[key]
+  Server.prototype.close = function() {
+    this.socket.close()
   }
 
-  ServerResponse.prototype.write = function(chunk) {
-    if (typeof chunk != "string") {
-      throw new Error("Response must be a string.")
-    }
-
-    this._body += chunk
+  http.createServer = function(fn) {
+    return new Server(fn)
   }
 
-  ServerResponse.prototype.end = function(chunk) {
-    if (arguments.length) this.write(chunk)
-
-    this.ws.send(this.serialize())
+  function Agent() {
+    this.requests = {}
   }
 
-  var anchor = root.document && document.createElement("a")
+  Agent.prototype = new EventEmitter
 
-  function ClientRequest(opts, cb) {
-    if (typeof opts == "string") {
-      anchor.href = opts
-      opts        = {}
+  Agent.prototype.listen = function(socket) {
+    var requests = this.requests
 
-      opts.hostname = anchor.hostname
-      opts.port     = anchor.port
-      opts.path     = anchor.pathname + anchor.search
-    }
+    this.socket = new Socket(socket)
 
-    this.url = opts.path
-    this.method = opts.method || "GET"
-    this.headers = {host: opts.hostname}
+    this.socket.on("response", function(res) {
+      var req = res && requests[res.id]
 
-    if (opts.port) this.headers.host += ":" + opts.port
+      if (!req) return
 
-    this.agent = opts.agent || http.globalAgent
+      req.emit("response", res)
+      res.emit("data", res.body)
+      res.emit("end")
 
-    this.once("response", cb)
-  }
-
-  ClientRequest.prototype = new EventEmitter
-  ClientRequest.prototype.serialize = serializeHTTP
-
-  ClientRequest.prototype._body = ""
-
-  ClientRequest.prototype.write = function(chunk) {
-    this._body += chunk
-  }
-
-  ClientRequest.prototype.end = function(chunk) {
-    var self = this
-    var id = Math.random().toString(36).slice(2)
-
-    if (arguments.length) this.write(chunk)
-
-    this.headers["x-brow-req-id"] = id
-    this.agent.requests[id] = this
-
-    this.agent.ws.send(this.serializeHTTP())
-  }
-
-  function ClientResponse(){}
-  ClientResponse.prototype = new EventEmitter
-  ClientResponse.prototype.parse = parseHTTP
-
-  function parseHTTP(data) {
-    var pattern = /\r?\n/g
-    var headers = this.headers = {}
-    var match = pattern.exec(data)
-    var start = 0
-    var end = match.index
-    var row = data.slice(start, end).split(" ")
-
-    if (row[1] > 0) {
-      this.httpVersion = row[0].slice(5)
-      this.statusCode = +row[1]
-      this.reason = row[2]
-    }
-
-    else {
-      this.method = row[0]
-      this.url = row[1]
-      this.httpVersion = row[2].slice(5)
-    }
-
-    while (true) {
-      start = end + match[0].length
-      match = pattern.exec(data)
-      end = match.index
-      row = data.slice(start, end)
-
-      if (!row) break
-
-      start = row.match(/:\s*/)
-      headers[row.slice(0, start.index)] = row.slice(start.index + start[0].length)
-    }
-
-    this._body = data.slice(end + match[0].length)
+      delete requests[res.id]
+    })
 
     return this
   }
 
-  var CRLF = "\r\n"
+  Agent.prototype.send = function(request) {
+    this.requests[request.id] = request
 
-  function serializeHTTP() {
-    var data = this.statusCode
-      ? "HTTP/" + this.httpVersion + " " + this.statusCode
-      : this.method + " " + this.url + " HTTP/" + this.httpVersion
-
-    data += CRLF
-
-    for (var name in this.headers) {
-      data += name + ": " + this.headers[name] + CRLF
-    }
-
-    data += CRLF + this._body
-
-    return data
+    this.socket.send(request.serialize())
   }
 
   http.get = function(opts, cb) {
-    return new ClientRequest(opts, cb).end()
+    return http.request(opts, cb).end()
   }
 
   http.request = function(opts, cb) {
-    return new ClientRequest(opts, cb)
+    var req = new Request
+
+    if (typeof opts == "string") {
+      var anchor = document.createElement("a")
+
+      anchor.href = opts
+
+      opts = {
+        host: anchor.host,
+        path: anchor.pathname + anchor.search
+      }
+    }
+
+    req.id           = http.guid()
+    req.url          = opts.path
+    req.method       = opts.method  || "GET"
+    req.headers      = opts.headers || {}
+    req.headers.host = opts.host    || opts.hostname + ":" + opts.port
+
+    req.once("end", function() {
+      (opts.agent || http.globalAgent).send(req)
+    })
+
+    if (cb) req.once("response", cb)
+
+    return req
   }
-}
+}()
