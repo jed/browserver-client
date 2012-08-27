@@ -1,5 +1,5 @@
 {
-  "name": "brow-client",
+  "name": "browserver-client",
   "version": "0.1.0",
   "description": "෴ A node.js HTTP server in your browser ෴",
   "main": "browserver.js",
