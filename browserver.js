@@ -254,14 +254,14 @@
     Stream.call(this)
   }
 
-  Response.pattern = /^HTTP\/(\S+) (\S+) (\S*)$/
+  Response.pattern = /^HTTP\/(\S+) (\S+) (.*)/
 
   Response.prototype = new Stream
   Response.prototype.httpVersion = "1.1"
   Response.prototype.writeHead = function(code, reason, headers) {
     if (typeof reason != "string") {
       headers = reason
-      reason = ""
+      reason = http.STATUS_CODES[code] || ""
     }
 
     this.statusCode = code
@@ -287,7 +287,7 @@
     this.startLine =
       "HTTP/" + this.httpVersion + " " +
       this.statusCode + " " +
-      (http.STATUS_CODES[this.statusCode] || "")
+      this.reasonPhrase
 
     return Message.prototype.serialize.call(this)
   }
