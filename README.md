@@ -70,7 +70,7 @@ The browserver-client API is basically a port of the node.js [http API](http://n
 
 - The aspects of the node.js implementation that don't map well to the browser (such as `writeContinue` and `addTrailers` methods, and client agents) have been omitted.
 
-Otherwise, if there is a method or behavior that differs from what you'd expect on node.js, please [file an issue](https://github.com/jed/browser-client/issues).
+Otherwise, if there is a method or behavior that differs from what you'd expect on node.js, please [file an issue](https://github.com/jed/browserver-client/issues).
 
 TODO
 ----
