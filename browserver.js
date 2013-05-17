@@ -15,7 +15,7 @@
   http.STATUS_CODES = {}
 
   http.guid = function() {
-    return Math.random().toString(36).slice(2)
+    return Math.random().toString(36).slice(2, 15)
   }
 
   var previousHttp = root.http
